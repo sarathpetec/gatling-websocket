@@ -26,5 +26,6 @@ libraryDependencies ++= Seq(
 )
 
 resolvers ++= Seq(
-    "excilys" at "http://repository.excilys.com/content/groups/public"
+    "excilys" at "http://repository.excilys.com/content/groups/public",
+    "typesafe" at "http://repo.typesafe.com/typesafe/releases"
 )
