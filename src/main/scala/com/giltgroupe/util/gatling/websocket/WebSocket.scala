@@ -8,6 +8,7 @@ import com.excilys.ebi.gatling.core.result.message.RequestStatus._
 import com.excilys.ebi.gatling.core.result.writer.DataWriter
 import com.excilys.ebi.gatling.core.session.{EvaluatableString, Session}
 import com.excilys.ebi.gatling.core.util.StringHelper._
+import com.excilys.ebi.gatling.core.util.TimeHelper.nowMillis
 import com.excilys.ebi.gatling.http.ahc.GatlingHttpClient
 import com.ning.http.client.websocket.{WebSocket, WebSocketListener, WebSocketTextListener, WebSocketUpgradeHandler}
 import grizzled.slf4j.Logging
@@ -99,14 +100,14 @@ private[websocket] class OpenWebSocketAction(attributeName: String, actionName: 
 
     val actor = context.actorOf(Props(new WebSocketActor(attributeName, requestLogger)))
 
-    val started = System.currentTimeMillis
+    val started = nowMillis
     try {
       webSocketClient.open(URI.create(fUrl(session)), new WebSocketTextListener {
         var opened = false
 
         def onOpen(webSocket: WebSocket) {
           opened = true
-          actor ! OnOpen(actionName, webSocket, started, System.currentTimeMillis, next, session)
+          actor ! OnOpen(actionName, webSocket, started, nowMillis, next, session)
         }
 
         def onMessage(message: String) {
@@ -121,7 +122,7 @@ private[websocket] class OpenWebSocketAction(attributeName: String, actionName: 
             actor ! OnClose()
           }
           else {
-            actor ! OnFailedOpen(actionName, "closed", started, System.currentTimeMillis, next, session)
+            actor ! OnFailedOpen(actionName, "closed", started, nowMillis, next, session)
           }
         }
 
@@ -130,14 +131,14 @@ private[websocket] class OpenWebSocketAction(attributeName: String, actionName: 
             actor ! OnError(t)
           }
           else {
-            actor ! OnFailedOpen(actionName, t.getMessage, started, System.currentTimeMillis, next, session)
+            actor ! OnFailedOpen(actionName, t.getMessage, started, nowMillis, next, session)
           }
         }
       })
     }
     catch {
       case e: IOException =>
-        actor ! OnFailedOpen(actionName, e.getMessage, started, System.currentTimeMillis, next, session)
+        actor ! OnFailedOpen(actionName, e.getMessage, started, nowMillis, next, session)
     }
   }
 }
@@ -184,17 +185,17 @@ private[websocket] class WebSocketActor(val attributeName: String, requestLogger
 
     case SendMessage(actionName, message, next, session) =>
       if (!handleEarlierError(actionName, next, session)) {
-        val started = System.currentTimeMillis
+        val started = nowMillis
         webSocket.foreach(_.sendTextMessage(message))
-        requestLogger.logRequest(session, actionName, OK, started, System.currentTimeMillis)
+        requestLogger.logRequest(session, actionName, OK, started, nowMillis)
         next ! session
       }
 
     case Close(actionName, next, session) =>
       if (!handleEarlierError(actionName, next, session)) {
-        val started = System.currentTimeMillis
+        val started = nowMillis
         webSocket.foreach(_.close)
-        requestLogger.logRequest(session, actionName, OK, started, System.currentTimeMillis)
+        requestLogger.logRequest(session, actionName, OK, started, nowMillis)
         next ! session
         context.stop(self)
       }
@@ -202,7 +203,7 @@ private[websocket] class WebSocketActor(val attributeName: String, requestLogger
 
   def handleEarlierError(actionName: String, next: ActorRef, session: Session) = {
     if (errorMessage.isDefined) {
-      val now = System.currentTimeMillis
+      val now = nowMillis
       requestLogger.logRequest(session, actionName, KO, now, now, errorMessage)
       errorMessage = None
       next ! session.setFailed
