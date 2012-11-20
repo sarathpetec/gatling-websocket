@@ -1,19 +1,18 @@
 package com.giltgroupe.util.gatling.websocket
 
+import akka.actor.{Props, ActorRef}
 import com.excilys.ebi.gatling.core.action.builder.ActionBuilder
-import com.excilys.ebi.gatling.core.action.{BaseActor, Bypass, Action, system}
+import com.excilys.ebi.gatling.core.action.{Action, BaseActor, Bypass, system}
 import com.excilys.ebi.gatling.core.config.ProtocolConfigurationRegistry
 import com.excilys.ebi.gatling.core.result.message.RequestStatus._
 import com.excilys.ebi.gatling.core.result.writer.DataWriter
-import com.excilys.ebi.gatling.core.session.{Session, EvaluatableString}
+import com.excilys.ebi.gatling.core.session.{EvaluatableString, Session}
 import com.excilys.ebi.gatling.core.util.StringHelper._
-import akka.actor.{Props, ActorRef}
-import com.typesafe.config.ConfigFactory
+import com.excilys.ebi.gatling.http.ahc.GatlingHttpClient
+import com.ning.http.client.websocket.{WebSocket, WebSocketListener, WebSocketTextListener, WebSocketUpgradeHandler}
 import grizzled.slf4j.Logging
-import org.eclipse.jetty.util.thread.QueuedThreadPool
-import org.eclipse.jetty.websocket.{WebSocket, WebSocketClientFactory, RandomMaskGen}
-import java.net.URI
 import java.io.IOException
+import java.net.URI
 
 object Predef {
   /**
@@ -23,23 +22,12 @@ object Predef {
    */
   def websocket(attributeName: String) = new WebSocketBaseBuilder(attributeName)
 
-  /** The default Jetty WebSocket client. */
+  /** The default AsyncHttpClient WebSocket client. */
   implicit object WebSocketClient extends WebSocketClient with Logging {
-    private[this] val client = {
-      val pool = new QueuedThreadPool(WebSocketConfiguration.maxClientThreads)
-      val factory = new WebSocketClientFactory(pool, new RandomMaskGen(), WebSocketConfiguration.bufferSize)
-      factory.start()
-
-      system.registerOnTermination(factory.stop())
-
-      val client = factory.newWebSocketClient()
-      client.setMaxIdleTime(WebSocketConfiguration.maxIdleTimeInMs)
-
-      client
-    }
-
-    def open(uri: URI, websocket: WebSocket) {
-      client.open(uri, websocket)
+    def open(uri: URI, listener: WebSocketListener) {
+      GatlingHttpClient.client.prepareGet(uri.toString).execute(
+        new WebSocketUpgradeHandler.Builder().addWebSocketListener(listener).build()
+      )
     }
   }
 
@@ -55,7 +43,7 @@ object Predef {
 
 trait WebSocketClient {
   @throws(classOf[IOException])
-  def open(uri: URI, websocket: WebSocket)
+  def open(uri: URI, listener: WebSocketListener)
 }
 
 trait RequestLogger {
@@ -113,24 +101,36 @@ private[websocket] class OpenWebSocketAction(attributeName: String, actionName: 
 
     val started = System.currentTimeMillis
     try {
-      webSocketClient.open(URI.create(fUrl(session)), new WebSocket.OnTextMessage {
+      webSocketClient.open(URI.create(fUrl(session)), new WebSocketTextListener {
         var opened = false
 
-        def onOpen(connection: WebSocket.Connection) {
+        def onOpen(webSocket: WebSocket) {
           opened = true
-          actor ! OnOpen(actionName, connection, started, System.currentTimeMillis, next, session)
+          actor ! OnOpen(actionName, webSocket, started, System.currentTimeMillis, next, session)
         }
 
-        def onMessage(data: String) {
-          actor ! OnMessage(data)
+        def onMessage(message: String) {
+          actor ! OnMessage(message)
         }
 
-        def onClose(closeCode: Int, message: String) {
+        def onFragment(fragment: String, last: Boolean) {
+        }
+
+        def onClose(webSocket: WebSocket) {
           if (opened) {
-            actor ! OnClose(closeCode, message)
+            actor ! OnClose()
           }
           else {
-            actor ! OnFailedOpen(actionName, "CloseCode " + closeCode + ", Message '" + message + "'", started, System.currentTimeMillis, next, session)
+            actor ! OnFailedOpen(actionName, "closed", started, System.currentTimeMillis, next, session)
+          }
+        }
+
+        def onError(t: Throwable) {
+          if (opened) {
+            actor ! OnError(t)
+          }
+          else {
+            actor ! OnFailedOpen(actionName, t.getMessage, started, System.currentTimeMillis, next, session)
           }
         }
       })
@@ -156,14 +156,14 @@ private[websocket] class CloseWebSocketAction(attributeName: String, actionName:
 }
 
 private[websocket] class WebSocketActor(val attributeName: String, requestLogger: RequestLogger) extends BaseActor {
-  var connection: Option[WebSocket.Connection] = None
-  var unexpectedCloseMessage: Option[String] = None
+  var webSocket: Option[WebSocket] = None
+  var errorMessage: Option[String] = None
 
   def receive = {
-    case OnOpen(actionName, conn, started, ended, next, session) =>
+    case OnOpen(actionName, webSocket, started, ended, next, session) =>
       requestLogger.logRequest(session, actionName, OK, started, ended)
-      connection = Some(conn)
-      next ! session.setAttribute(attributeName, (self, connection))
+      this.webSocket = Some(webSocket)
+      next ! session.setAttribute(attributeName, (self, webSocket))
 
     case OnFailedOpen(actionName, message, started, ended, next, session) =>
       warn("Websocket '" + attributeName + "' failed to open: " + message)
@@ -171,45 +171,40 @@ private[websocket] class WebSocketActor(val attributeName: String, requestLogger
       next ! session.setFailed
       context.stop(self)
 
-    case OnMessage(data) =>
-      if (isDebugEnabled) debug("Received message on websocket '" + attributeName + "':" + END_OF_LINE + data)
+    case OnMessage(message) =>
+      if (isDebugEnabled) debug("Received message on websocket '" + attributeName + "':" + END_OF_LINE + message)
 
-    case OnClose(closeCode, message) =>
-      unexpectedCloseMessage = Some("Websocket '" + attributeName + "' was unexpectedly closed: CloseCode " + closeCode + ", Message '" + message + "'")
-      warn(unexpectedCloseMessage.get)
+    case OnClose() =>
+      errorMessage = Some("Websocket '" + attributeName + "' was unexpectedly closed")
+      warn(errorMessage.get)
+
+    case OnError(t) =>
+      errorMessage = Some("Websocket '" + attributeName + "' gave an error: '" + t.getMessage + "'")
+      warn(errorMessage.get)
 
     case SendMessage(actionName, message, next, session) =>
-      if (!handleUnexpectedClose(actionName, next, session)) {
+      if (!handleEarlierError(actionName, next, session)) {
         val started = System.currentTimeMillis
-        try {
-          connection.foreach(_.sendMessage(message))
-          requestLogger.logRequest(session, actionName, OK, started, System.currentTimeMillis)
-          next ! session
-        }
-        catch {
-          case e: IOException =>
-            warn("Error sending message on websocket '" + attributeName + "'", e)
-            requestLogger.logRequest(session, actionName, KO, started, System.currentTimeMillis, Some(e.getMessage))
-            next ! session.setFailed
-            context.stop(self)
-        }
+        webSocket.foreach(_.sendTextMessage(message))
+        requestLogger.logRequest(session, actionName, OK, started, System.currentTimeMillis)
+        next ! session
       }
 
     case Close(actionName, next, session) =>
-      if (!handleUnexpectedClose(actionName, next, session)) {
+      if (!handleEarlierError(actionName, next, session)) {
         val started = System.currentTimeMillis
-        connection.foreach(_.close)
+        webSocket.foreach(_.close)
         requestLogger.logRequest(session, actionName, OK, started, System.currentTimeMillis)
         next ! session
         context.stop(self)
       }
   }
 
-  def handleUnexpectedClose(actionName: String, next: ActorRef, session: Session) = {
-    if (unexpectedCloseMessage.isDefined) {
+  def handleEarlierError(actionName: String, next: ActorRef, session: Session) = {
+    if (errorMessage.isDefined) {
       val now = System.currentTimeMillis
-      requestLogger.logRequest(session, actionName, KO, now, now, unexpectedCloseMessage)
-      unexpectedCloseMessage = None
+      requestLogger.logRequest(session, actionName, KO, now, now, errorMessage)
+      errorMessage = None
       next ! session.setFailed
       context.stop(self)
       true
@@ -220,18 +215,11 @@ private[websocket] class WebSocketActor(val attributeName: String, requestLogger
   }
 }
 
-private[websocket] case class OnOpen(actionName: String, connection: WebSocket.Connection, started: Long, ended: Long, next: ActorRef, session: Session)
+private[websocket] case class OnOpen(actionName: String, webSocket: WebSocket, started: Long, ended: Long, next: ActorRef, session: Session)
 private[websocket] case class OnFailedOpen(actionName: String, message: String, started: Long, ended: Long, next: ActorRef, session: Session)
-private[websocket] case class OnMessage(data: String)
-private[websocket] case class OnClose(closeCode: Int, message: String)
+private[websocket] case class OnMessage(message: String)
+private[websocket] case class OnClose()
+private[websocket] case class OnError(t: Throwable)
 
 private[websocket] case class SendMessage(actionName: String, message: String, next: ActorRef, session: Session)
 private[websocket] case class Close(actionName: String, next: ActorRef, session: Session)
-
-private[websocket] object WebSocketConfiguration {
-  val config = ConfigFactory.parseResources(getClass.getClassLoader, "gatling.conf")
-
-  val maxClientThreads = config.getInt("gatling.websocket.maxClientThreads")
-  val bufferSize = config.getInt("gatling.websocket.bufferSize")
-  val maxIdleTimeInMs = config.getInt("gatling.websocket.maxIdleTimeInMs")
-}

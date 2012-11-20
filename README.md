@@ -11,26 +11,8 @@ First create the jar:
 
     sbt package
 
-... then copy `target/gatling-websocket-0.0.1.jar` to Gatling's `lib`
+... then copy `target/gatling-websocket-0.0.2.jar` to Gatling's `lib`
 directory.
-
-gatling-websocket uses the Jetty WebSocket API, so you also need to fetch the
-latest stable version of
-[Jetty 8](http://download.eclipse.org/jetty/stable-8/dist/) and copy
-`lib/jetty-http_*.jar`, `lib/jetty_io_*.jar`, `lib/jetty_util_*.jar` and
-`lib/jetty_websocket_*.jar` to Gatling's `lib` directory.
-
-Finally, you need to add some settings to gatling.conf:
-
-    gatling {
-        ...
-        websocket {
-            maxClientThreads = 8
-            bufferSize = 8192
-            maxIdleTimeInMs = 300000
-        }
-        ...
-    }
 
 In your simulation, import the DSL:
 

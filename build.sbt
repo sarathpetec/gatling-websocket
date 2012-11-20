@@ -2,7 +2,7 @@ name := "gatling-websocket"
 
 organization := "com.giltgroupe.util"
 
-version := "0.0.1"
+version := "0.0.2"
 
 scalaVersion := "2.9.2"
 
@@ -13,9 +13,9 @@ javacOptions ++= Seq("-Xlint:deprecation", "-encoding", "utf8")
 crossPaths := false
 
 libraryDependencies ++= Seq(
-    "org.eclipse.jetty" % "jetty-websocket" % "8.1.7.v20120910",
+    "com.ning" % "async-http-client" % "1.7.+",
     "com.excilys.ebi.gatling" % "gatling-core" % "1.3.+",
-    "com.typesafe" % "config" % "0.6.+"
+    "com.excilys.ebi.gatling" % "gatling-http" % "1.3.+"
 )
 
 libraryDependencies ++= Seq(
