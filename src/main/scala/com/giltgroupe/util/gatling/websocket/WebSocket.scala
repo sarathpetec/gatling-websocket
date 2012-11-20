@@ -119,7 +119,7 @@ private[websocket] class OpenWebSocketAction(attributeName: String, actionName: 
 
         def onClose(webSocket: WebSocket) {
           if (opened) {
-            actor ! OnClose()
+            actor ! OnClose
           }
           else {
             actor ! OnFailedOpen(actionName, "closed", started, nowMillis, next, session)
@@ -175,7 +175,7 @@ private[websocket] class WebSocketActor(val attributeName: String, requestLogger
     case OnMessage(message) =>
       debug("Received message on websocket '" + attributeName + "':" + END_OF_LINE + message)
 
-    case OnClose() =>
+    case OnClose =>
       errorMessage = Some("Websocket '" + attributeName + "' was unexpectedly closed")
       warn(errorMessage.get)
 
@@ -219,7 +219,7 @@ private[websocket] class WebSocketActor(val attributeName: String, requestLogger
 private[websocket] case class OnOpen(actionName: String, webSocket: WebSocket, started: Long, ended: Long, next: ActorRef, session: Session)
 private[websocket] case class OnFailedOpen(actionName: String, message: String, started: Long, ended: Long, next: ActorRef, session: Session)
 private[websocket] case class OnMessage(message: String)
-private[websocket] case class OnClose()
+private[websocket] case object OnClose
 private[websocket] case class OnError(t: Throwable)
 
 private[websocket] case class SendMessage(actionName: String, message: String, next: ActorRef, session: Session)
