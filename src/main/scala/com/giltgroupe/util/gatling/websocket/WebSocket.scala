@@ -173,7 +173,7 @@ private[websocket] class WebSocketActor(val attributeName: String, requestLogger
       context.stop(self)
 
     case OnMessage(message) =>
-      if (isDebugEnabled) debug("Received message on websocket '" + attributeName + "':" + END_OF_LINE + message)
+      debug("Received message on websocket '" + attributeName + "':" + END_OF_LINE + message)
 
     case OnClose() =>
       errorMessage = Some("Websocket '" + attributeName + "' was unexpectedly closed")
