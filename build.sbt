@@ -14,8 +14,8 @@ crossPaths := false
 
 libraryDependencies ++= Seq(
     "com.ning" % "async-http-client" % "1.7.+",
-    "com.excilys.ebi.gatling" % "gatling-core" % "1.3.+",
-    "com.excilys.ebi.gatling" % "gatling-http" % "1.3.+"
+    "com.excilys.ebi.gatling" % "gatling-core" % "1.3.5",
+    "com.excilys.ebi.gatling" % "gatling-http" % "1.3.5"
 )
 
 libraryDependencies ++= Seq(
@@ -29,3 +29,5 @@ resolvers ++= Seq(
     "excilys" at "http://repository.excilys.com/content/groups/public",
     "typesafe" at "http://repo.typesafe.com/typesafe/releases"
 )
+
+publishTo := Some("Internal Releases" at "https://nexus.gilt.com/nexus/content/repositories/internal-releases/")

@@ -58,7 +58,7 @@ class WebSocketBaseBuilder(val attributeName: String) {
    * @param fUrl The socket URL
    * @param actionName The action name in the log
    */
-  def open(fUrl: EvaluatableString, actionName: String = attributeName)(implicit webSocketClient: WebSocketClient, requestLogger: RequestLogger) = new OpenWebSocketActionBuilder(attributeName, actionName, fUrl, webSocketClient, requestLogger)
+  def open(fUrl: EvaluatableString, actionName: EvaluatableString = (_ => attributeName))(implicit webSocketClient: WebSocketClient, requestLogger: RequestLogger) = new OpenWebSocketActionBuilder(attributeName, actionName, fUrl, webSocketClient, requestLogger)
 
   /**
    * Sends a message on the given socket.
@@ -66,36 +66,49 @@ class WebSocketBaseBuilder(val attributeName: String) {
    * @param fMessage The message
    * @param actionName The action name in the log
    */
-  def sendMessage(fMessage: EvaluatableString, actionName: String = attributeName) = new SendWebSocketMessageActionBuilder(attributeName, actionName, fMessage)
+  def sendMessage(fMessage: EvaluatableString, actionName: EvaluatableString = (_ => attributeName)) = new SendWebSocketMessageActionBuilder(attributeName, actionName, fMessage)
 
   /**
    * Closes a web socket.
    *
    * @param actionName The action name in the log
    */
-  def close(actionName: String = attributeName) = new CloseWebSocketActionBuilder(attributeName, actionName)
+  def close(actionName: EvaluatableString = (_ => attributeName)) = new CloseWebSocketActionBuilder(attributeName, actionName)
 }
 
-class OpenWebSocketActionBuilder(val attributeName: String, val actionName: String, val fUrl: EvaluatableString, val webSocketClient: WebSocketClient, val requestLogger: RequestLogger, val next: ActorRef = null) extends ActionBuilder {
+class OpenWebSocketActionBuilder(val attributeName: String, val actionName: EvaluatableString, val fUrl: EvaluatableString, val webSocketClient: WebSocketClient, val requestLogger: RequestLogger, val next: ActorRef = null) extends ActionBuilder {
   def withNext(next: ActorRef): ActionBuilder = new OpenWebSocketActionBuilder(attributeName, actionName, fUrl, webSocketClient, requestLogger, next)
 
   def build(registry: ProtocolConfigurationRegistry): ActorRef = system.actorOf(Props(new OpenWebSocketAction(attributeName, actionName, fUrl, webSocketClient, requestLogger, next, registry)))
 }
 
-class SendWebSocketMessageActionBuilder(val attributeName: String, val actionName: String, val fMessage: EvaluatableString, val next: ActorRef = null) extends ActionBuilder {
+class SendWebSocketMessageActionBuilder(val attributeName: String, val actionName: EvaluatableString, val fMessage: EvaluatableString, val next: ActorRef = null) extends ActionBuilder {
   def withNext(next: ActorRef): ActionBuilder = new SendWebSocketMessageActionBuilder(attributeName, actionName, fMessage, next)
 
   def build(registry: ProtocolConfigurationRegistry): ActorRef = system.actorOf(Props(new SendWebSocketMessageAction(attributeName, actionName, fMessage, next, registry)))
 }
 
-class CloseWebSocketActionBuilder(val attributeName: String, val actionName: String, val next: ActorRef = null) extends ActionBuilder {
+class CloseWebSocketActionBuilder(val attributeName: String, val actionName: EvaluatableString, val next: ActorRef = null) extends ActionBuilder {
   def withNext(next: ActorRef): ActionBuilder = new CloseWebSocketActionBuilder(attributeName, actionName, next)
 
   def build(registry: ProtocolConfigurationRegistry): ActorRef = system.actorOf(Props(new CloseWebSocketAction(attributeName, actionName, next, registry)))
 }
 
-private[websocket] class OpenWebSocketAction(attributeName: String, actionName: String, fUrl: EvaluatableString, webSocketClient: WebSocketClient, requestLogger: RequestLogger, next: ActorRef, registry: ProtocolConfigurationRegistry) extends Action(attributeName, next) with Bypass {
+private[websocket] abstract class WebSocketAction(actionName: EvaluatableString) extends Action() with Bypass {
+  def resolvedActionName(session: Session): String = {
+    try {
+      actionName(session)
+    }
+    catch {
+      case e => error("Action name resolution crashed", e); "no-name"
+    }
+  }
+}
+
+private[websocket] class OpenWebSocketAction(attributeName: String, actionName: EvaluatableString, fUrl: EvaluatableString, webSocketClient: WebSocketClient, requestLogger: RequestLogger, val next: ActorRef, registry: ProtocolConfigurationRegistry) extends WebSocketAction(actionName) {
   def execute(session: Session) {
+    val rActionName = resolvedActionName(session)
+
     info("Opening websocket '" + attributeName + "': Scenario '" + session.scenarioName + "', UserId #" + session.userId)
 
     val actor = context.actorOf(Props(new WebSocketActor(attributeName, requestLogger)))
@@ -107,7 +120,7 @@ private[websocket] class OpenWebSocketAction(attributeName: String, actionName: 
 
         def onOpen(webSocket: WebSocket) {
           opened = true
-          actor ! OnOpen(actionName, webSocket, started, nowMillis, next, session)
+          actor ! OnOpen(rActionName, webSocket, started, nowMillis, next, session)
         }
 
         def onMessage(message: String) {
@@ -122,7 +135,7 @@ private[websocket] class OpenWebSocketAction(attributeName: String, actionName: 
             actor ! OnClose
           }
           else {
-            actor ! OnFailedOpen(actionName, "closed", started, nowMillis, next, session)
+            actor ! OnFailedOpen(rActionName, "closed", started, nowMillis, next, session)
           }
         }
 
@@ -131,28 +144,29 @@ private[websocket] class OpenWebSocketAction(attributeName: String, actionName: 
             actor ! OnError(t)
           }
           else {
-            actor ! OnFailedOpen(actionName, t.getMessage, started, nowMillis, next, session)
+            actor ! OnFailedOpen(rActionName, t.getMessage, started, nowMillis, next, session)
           }
         }
       })
     }
     catch {
       case e: IOException =>
-        actor ! OnFailedOpen(actionName, e.getMessage, started, nowMillis, next, session)
+        actor ! OnFailedOpen(rActionName, e.getMessage, started, nowMillis, next, session)
     }
   }
 }
 
-private[websocket] class SendWebSocketMessageAction(attributeName: String, actionName: String, fMessage: EvaluatableString, next: ActorRef, registry: ProtocolConfigurationRegistry) extends Action(attributeName, next) with Bypass {
+private[websocket] class SendWebSocketMessageAction(attributeName: String, actionName: EvaluatableString, fMessage: EvaluatableString, val next: ActorRef, registry: ProtocolConfigurationRegistry) extends WebSocketAction(actionName) {
   def execute(session: Session) {
-    session.getAttributeAsOption[(ActorRef, _)](attributeName).foreach(_._1 ! SendMessage(actionName, fMessage(session), next, session))
+    session.getAttributeAsOption[(ActorRef, _)](attributeName).foreach(_._1 ! SendMessage(resolvedActionName(session), fMessage(session), next, session))
   }
 }
 
-private[websocket] class CloseWebSocketAction(attributeName: String, actionName: String, next: ActorRef, registry: ProtocolConfigurationRegistry) extends Action(attributeName, next) with Bypass {
+private[websocket] class CloseWebSocketAction(attributeName: String, actionName: EvaluatableString, val next: ActorRef, registry: ProtocolConfigurationRegistry) extends WebSocketAction(actionName) {
   def execute(session: Session) {
+    val rActionName = resolvedActionName(session)
     info("Closing websocket '" + attributeName + "': Scenario '" + session.scenarioName + "', UserId #" + session.userId)
-    session.getAttributeAsOption[(ActorRef, _)](attributeName).foreach(_._1 ! Close(actionName, next, session))
+    session.getAttributeAsOption[(ActorRef, _)](attributeName).foreach(_._1 ! Close(rActionName, next, session))
   }
 }
 
