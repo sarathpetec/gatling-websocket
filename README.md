@@ -41,6 +41,21 @@ Finally, you should close the socket at the end of the simulation:
 
 The parameter is the optional request name again.
 
+Complete example
+================
+
+    class WebsocketSimulation extends Simulation {
+      def apply = {
+        val scn = scenario("Scenario name")
+          .exec(websocket("socket").open("ws://localhost:8000/ws", "socket_open"))
+          .exec(websocket("socket").sendMessage("my data", "socket_send"))
+          .pause(10)
+          .exec(websocket("socket").close("socket_close"))
+    
+        List(scn.configure.users(10).ramp(2))
+      }
+    }
+
 License
 =======
 
