@@ -2,7 +2,7 @@ name := "gatling-websocket"
 
 organization := "com.giltgroupe.util"
 
-version := "0.0.4"
+version := "0.0.5"
 
 scalaVersion := "2.9.2"
 
@@ -14,8 +14,8 @@ crossPaths := false
 
 libraryDependencies ++= Seq(
     "com.ning" % "async-http-client" % "1.7.+",
-    "com.excilys.ebi.gatling" % "gatling-core" % "1.3.5",
-    "com.excilys.ebi.gatling" % "gatling-http" % "1.3.5"
+    "com.excilys.ebi.gatling" % "gatling-core" % "[1.3.5,1.4.0]",
+    "com.excilys.ebi.gatling" % "gatling-http" % "[1.3.5,1.4.0]"
 )
 
 libraryDependencies ++= Seq(

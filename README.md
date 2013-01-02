@@ -11,7 +11,7 @@ First create the jar:
 
     sbt package
 
-... then copy `target/gatling-websocket-0.0.4.jar` to Gatling's `lib`
+... then copy `target/gatling-websocket-0.0.5.jar` to Gatling's `lib`
 directory.
 
 In your simulation, import the DSL:
@@ -45,15 +45,13 @@ Complete example
 ================
 
     class WebsocketSimulation extends Simulation {
-      def apply = {
-        val scn = scenario("Scenario name")
-          .exec(websocket("socket").open("ws://localhost:8000/ws", "socket_open"))
-          .exec(websocket("socket").sendMessage("my data", "socket_send"))
-          .pause(10)
-          .exec(websocket("socket").close("socket_close"))
+      val scn = scenario("Scenario name")
+        .exec(websocket("socket").open("ws://localhost:8000/ws", "socket_open"))
+        .exec(websocket("socket").sendMessage("my data", "socket_send"))
+        .pause(10)
+        .exec(websocket("socket").close("socket_close"))
     
-        List(scn.configure.users(10).ramp(2))
-      }
+      setUp(scn.users(10).ramp(2))
     }
 
 License
