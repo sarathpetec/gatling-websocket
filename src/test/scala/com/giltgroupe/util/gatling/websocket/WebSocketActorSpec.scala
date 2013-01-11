@@ -4,7 +4,7 @@ import akka.actor.{Actor, Props}
 import akka.testkit.TestActorRef
 import com.excilys.ebi.gatling.core.Predef._
 import com.excilys.ebi.gatling.core.action.system
-import com.excilys.ebi.gatling.core.config.ProtocolConfigurationRegistry
+import com.excilys.ebi.gatling.core.config.{GatlingConfiguration, ProtocolConfigurationRegistry}
 import com.excilys.ebi.gatling.core.result.message.RequestStatus._
 import com.excilys.ebi.gatling.core.session.Session
 import com.ning.http.client.websocket.{WebSocket, WebSocketListener}
@@ -26,6 +26,8 @@ class WebSocketActorSpec extends Specification with AllExpectations with Mockito
   step {
     // initialize logging to avoid substitute logger error messages
     LoggerFactory.getLogger(classOf[WebSocketActorSpec])
+    // set up configuration to avoid NPEs constructing actors
+    GatlingConfiguration.setUp()
     success
   }
 
